@@ -21,7 +21,8 @@
    https://fedorahosted.org/pipermail/crash-catcher/2012-March/002529.html */
 /*
  * TODO segv handler?
- * TODO reliable symbols
+ * TODO think about tests
+ * TODO think about integration
  */
 
 #include "utils.h"
@@ -93,6 +94,7 @@ warn(const char *fmt, ...)
 
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
     va_end(ap);
 
 }
@@ -205,6 +207,11 @@ load_map_file(const char *maps_file)
     return head;
 }
 
+/* Returns hex-encoded build id of elf_file, or NULL if none is found. If the
+ * mtime of core_mtime is newer than that of elf_file, error is returned. The
+ * string pointed to by error_msg contains the error message, or is not written
+ * to if there is no error.
+ */
 static char*
 build_id_from_file(const char *elf_file, time_t core_mtime, char **error_msg)
 {
@@ -319,7 +326,10 @@ fail_close:
     return result;
 }
 
-/* function that extracts build ids and vaddrs from coredumps */
+/* Extracts information about executable segments in the coredump. If we can
+ * find an executable for the segment, we check whether the executable is older
+ * than the coredump and extract a build id from it.
+ */
 static struct core_segment_data *
 analyze_coredump(const char *elf_file, struct mapping_data *maps,
                  char **error_msg)
@@ -499,28 +509,35 @@ unwind_thread(struct UCD_info *ui, unw_addr_space_t as,
             btp_strdup(ip_seg->filename) : NULL;
 
         unw_proc_info_t pi;
+        unw_word_t off;
+        char funcname[10*1024]; /* mangled C++ names are HUGE */
         ret = unw_get_proc_info(&c, &pi);
         if (ret >= 0 && pi.start_ip + 1 != pi.end_ip)
         {
             entry->function_initial_loc = pi.start_ip;
             entry->function_length = pi.end_ip - pi.start_ip - 1;
-        }
 
-        /* TODO: this is _unreliable_, as it gives the _closest_ symbol which
-         * often isn't the correct one */
-        char funcname[10*1024]; /* mangled C++ names are HUGE */
-        unw_word_t off;
-        ret = unw_get_proc_name(&c, funcname, sizeof(funcname)-1, &off);
-        if (ret == 0)
-        {
-            entry->symbol = btp_strdup(funcname);
+            /* NOTE: unw_get_proc_name returns the closest label when the
+             * symbols are stripped from the file, which is usually incorrect
+             * and can be confusing. We use the start and end IPs of the
+             * procedure to determine whether the label lies inside it and
+             * ignore it if it doesn't.
+             * It would be more correct to check whether ip-off==start_ip, but
+             * label inside the procedure can still be helpful (and gdb shows
+             * that one as well).
+             */
+            ret = unw_get_proc_name(&c, funcname, sizeof(funcname)-1, &off);
+            if (ret == 0 && ip-off >= pi.start_ip)
+            {
+                entry->symbol = btp_strdup(funcname);
+            }
         }
 
         trace = g_list_append(trace, entry);
         printf("%s 0x%llx %s %s -\n",
                 (ip_seg && ip_seg->build_id) ? ip_seg->build_id : "-",
                 (unsigned long long)(ip_seg ? ip - ip_seg->vaddr : ip),
-                funcname,
+                (entry->symbol ? entry->symbol : "-"),
                 (ip_seg && ip_seg->filename) ? ip_seg->filename : "-"
         );
 
@@ -585,7 +602,8 @@ btp_parse_coredump(const char *core_file, const char *maps_file,
     {
         if (_UCD_add_backing_file_at_vaddr(ui, map->start, map->filename) < 0)
         {
-            set_error("Can't add backing file '%s'", map->filename);
+            set_error("Can't add backing file '%s' at addr 0x%jx",
+                      map->filename, (uintmax_t)map->start);
             goto fail_destroy_ui;
         }
     }
