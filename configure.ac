@@ -77,14 +77,9 @@ AC_CHECK_LIB([bfd], [main])
 AC_CHECK_HEADERS([dwarf.h elfutils/libdw.h elfutils/libdwfl.h gelf.h libelf.h])
 AC_CHECK_LIB([elf], [main])
 # dwfl is actually part of libdw, at least on fedora
-AC_CHECK_LIB([dw], [main])
+# needed for stack unwinding
+AC_CHECK_LIB([dw], [dwfl_frame_state_core])
 AC_CHECK_LIB([dl], [main])
-
-# libunwind
-AC_CHECK_HEADERS([libunwind-coredump.h])
-AC_CHECK_LIB([unwind], [main])
-AC_CHECK_LIB([unwind-generic], [main])
-AC_CHECK_LIB([unwind-coredump], [main])
 
 # rpm
 AC_CHECK_LIB([rpm], [main])

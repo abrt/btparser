@@ -39,19 +39,6 @@
 /* Define to 1 if you have the `rpm' library (-lrpm). */
 #undef HAVE_LIBRPM
 
-/* Define to 1 if you have the `unwind' library (-lunwind). */
-#undef HAVE_LIBUNWIND
-
-/* Define to 1 if you have the `unwind-coredump' library (-lunwind-coredump).
-   */
-#undef HAVE_LIBUNWIND_COREDUMP
-
-/* Define to 1 if you have the <libunwind-coredump.h> header file. */
-#undef HAVE_LIBUNWIND_COREDUMP_H
-
-/* Define to 1 if you have the `unwind-generic' library (-lunwind-generic). */
-#undef HAVE_LIBUNWIND_GENERIC
-
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
 
@@ -94,6 +81,9 @@
 
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
+
+/* Define to the home page for this package. */
+#undef PACKAGE_URL
 
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION

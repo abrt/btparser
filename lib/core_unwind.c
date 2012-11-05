@@ -23,8 +23,8 @@
 #include "core_stacktrace.h"
 #include "config.h"
 
-#if (defined HAVE_LIBUNWIND && defined HAVE_LIBUNWIND_COREDUMP && defined HAVE_LIBUNWIND_GENERIC && defined HAVE_LIBUNWIND_COREDUMP_H && defined HAVE_LIBELF_H && defined HAVE_GELF_H && defined HAVE_LIBELF && defined HAVE_LIBDW && defined HAVE_ELFUTILS_LIBDWFL_H)
-#  define WITH_LIBUNWIND
+#if (defined HAVE_LIBELF_H && defined HAVE_GELF_H && defined HAVE_LIBELF && defined HAVE_LIBDW && defined HAVE_ELFUTILS_LIBDWFL_H)
+#  define WITH_LIBDWFL
 #endif
 
 #include <stdio.h>
@@ -36,10 +36,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef WITH_LIBUNWIND
+#ifdef WITH_LIBDWFL
 #include <libelf.h>
 #include <gelf.h>
-#include <libunwind-coredump.h>
 #include <elfutils/libdwfl.h>
 #endif
 
@@ -83,21 +82,13 @@ _set_error(char **error_msg, const char *fmt, ...)
     va_end(ap);
 }
 
-#ifdef WITH_LIBUNWIND
-
-struct exe_mapping_data
-{
-    uint64_t start;
-    char *filename;
-    struct exe_mapping_data *next;
-};
+#ifdef WITH_LIBDWFL
 
 struct core_handle
 {
     int fd;
     Elf *eh;
     Dwfl *dwfl;
-    struct exe_mapping_data *segments;
 };
 
 /* FIXME: is there another way to pass the executable name to the find_elf
@@ -120,26 +111,10 @@ warn(const char *fmt, ...)
 }
 
 static void
-exe_mapping_data_free(struct exe_mapping_data *seg)
-{
-    struct exe_mapping_data *next;
-
-    while (seg)
-    {
-        free(seg->filename);
-
-        next = seg->next;
-        free(seg);
-        seg = next;
-    }
-}
-
-static void
 core_handle_free(struct core_handle *ch)
 {
     if (ch)
     {
-        exe_mapping_data_free(ch->segments);
         if (ch->dwfl)
             dwfl_end(ch->dwfl);
         if (ch->eh)
@@ -191,13 +166,10 @@ static int find_debuginfo_none (Dwfl_Module *mod, void **userdata,
     return -1;
 }
 
-static int cb_exe_maps(Dwfl_Module *mod, void **userdata, const char *name,
-                       Dwarf_Addr start_addr, void *arg)
+static int touch_module(Dwfl_Module *mod, void **userdata, const char *name,
+                        Dwarf_Addr start_addr, void *arg)
 {
-    struct exe_mapping_data ***tailp = arg;
-    const char *filename = NULL;
     GElf_Addr bias;
-    Dwarf_Addr base;
 
     if (dwfl_module_getelf (mod, &bias) == NULL)
     {
@@ -205,23 +177,12 @@ static int cb_exe_maps(Dwfl_Module *mod, void **userdata, const char *name,
         return DWARF_CB_OK;
     }
 
-    dwfl_module_info(mod, NULL, &base, NULL, NULL, NULL, &filename, NULL);
-
-    if (filename)
-    {
-        **tailp = btp_mallocz(sizeof(struct exe_mapping_data));
-        (**tailp)->start = (uint64_t)base;
-        (**tailp)->filename = btp_strdup(filename);
-        *tailp = &((**tailp)->next);
-    }
-
     return DWARF_CB_OK;
 }
 
 /* Gets dwfl handle and executable map data to be used for unwinding */
 static struct core_handle *
-analyze_coredump(const char *elf_file, const char *exe_file,
-                 char **error_msg)
+open_coredump(const char *elf_file, const char *exe_file, char **error_msg)
 {
     struct exe_mapping_data *head = NULL, **tail = &head;
     int fd;
@@ -282,16 +243,11 @@ analyze_coredump(const char *elf_file, const char *exe_file,
         goto fail_dwfl;
     }
 
-    ptrdiff_t ret = dwfl_getmodules(dwfl, cb_exe_maps, &tail, 0);
+    /* needed so that module filenames are available during unwinding */
+    ptrdiff_t ret = dwfl_getmodules(dwfl, touch_module, &tail, 0);
     if (ret == -1)
     {
         set_error_dwfl("dwfl_getmodules");
-        goto fail_dwfl;
-    }
-
-    if (!*error_msg && !head)
-    {
-        set_error("No segments found in coredump '%s'", elf_file);
         goto fail_dwfl;
     }
 
@@ -299,12 +255,10 @@ analyze_coredump(const char *elf_file, const char *exe_file,
     ch->fd = fd;
     ch->eh = e;
     ch->dwfl = dwfl;
-    ch->segments = head;
     return ch;
 
 fail_dwfl:
     dwfl_end(dwfl);
-    exe_mapping_data_free(head);
 fail_elf:
     elf_end(e);
 fail_close:
@@ -314,44 +268,33 @@ fail_close:
 }
 
 static struct btp_core_thread *
-unwind_thread(struct UCD_info *ui,
-              unw_addr_space_t as,
-              Dwfl *dwfl,
-              int thread_no,
-              char **error_msg)
+unwind_thread(Dwfl *dwfl, Dwfl_Frame_State *state, char **error_msg)
 {
     int ret;
-    unw_cursor_t c;
-    struct btp_core_frame *trace = NULL;
+    struct btp_core_frame *head = NULL, *tail = NULL;
+    pid_t tid = 0;
 
-    _UCD_select_thread(ui, thread_no);
-
-    ret = unw_init_remote(&c, as, ui);
-    if (ret < 0)
+    if (state)
     {
-        set_error("unw_init_remote failed: %s", unw_strerror(ret));
-        return NULL;
+        tid = dwfl_frame_tid_get(state);
     }
 
-    int count = 1000;
-    while (--count > 0)
+    while (state)
     {
-        unw_word_t ip;
-        ret = unw_get_reg(&c, UNW_REG_IP, &ip);
-        if (ret < 0)
-            warn("unw_get_reg(UNW_REG_IP) failed: %s", unw_strerror(ret));
-
-        /* Seen this happen when unwinding thread that did not start
-         * in main(). */
-        if (ip == 0)
+        Dwarf_Addr pc, pc_adjusted;
+        bool minus_one;
+        if (!dwfl_frame_state_pc(state, &pc, &minus_one))
+        {
+            warn("Failed to obtain PC: %s", dwfl_errmsg(-1));
             break;
+        }
+        pc_adjusted = pc - (minus_one ? 1 : 0);
 
-        struct btp_core_frame *entry = btp_core_frame_new();
-        entry->address = entry->build_id_offset = ip;
-        entry->build_id = entry->file_name = NULL;
-        entry->function_name = NULL;
+        struct btp_core_frame *frame = btp_core_frame_new();
+        frame->address = frame->build_id_offset = (uint64_t)pc;
+        list_append(head, tail, frame);
 
-        Dwfl_Module *mod = dwfl_addrmodule(dwfl, (Dwarf_Addr)ip);
+        Dwfl_Module *mod = dwfl_addrmodule(dwfl, (Dwarf_Addr)pc_adjusted);
         if (mod)
         {
             const unsigned char *build_id_bits;
@@ -362,131 +305,103 @@ unwind_thread(struct UCD_info *ui,
             ret = dwfl_module_build_id(mod, &build_id_bits, &bid_addr);
             if (ret > 0)
             {
-                entry->build_id = btp_mallocz(2*ret + 1);
-                btp_bin2hex(entry->build_id, (const char *)build_id_bits, ret);
+                frame->build_id = btp_mallocz(2*ret + 1);
+                btp_bin2hex(frame->build_id, (const char *)build_id_bits, ret);
             }
 
             if (dwfl_module_info(mod, NULL, &start, NULL, NULL, NULL,
                                  &filename, NULL) != NULL)
             {
-                entry->build_id_offset = (Dwarf_Addr)ip - start;
+                frame->build_id_offset = (Dwarf_Addr)pc - start;
                 if (filename)
-                    entry->file_name = btp_strdup(filename);
+                    frame->file_name = btp_strdup(filename);
             }
 
-            funcname = dwfl_module_addrname(mod, (GElf_Addr)ip);
+            funcname = dwfl_module_addrname(mod, (GElf_Addr)pc_adjusted);
             if (funcname)
-                entry->function_name = btp_strdup(funcname);
+                frame->function_name = btp_strdup(funcname);
         }
 
-        trace = btp_core_frame_append(trace, entry);
-        /*
-        printf("%s 0x%llx %s %s -\n",
-                (ip_seg && ip_seg->build_id) ? ip_seg->build_id : "-",
-                (unsigned long long)(ip_seg ? ip - ip_seg->vaddr : ip),
-                (entry->symbol ? entry->symbol : "-"),
-                (ip_seg && ip_seg->filename) ? ip_seg->filename : "-");
-        */
-        ret = unw_step(&c);
-        if (ret == 0)
-            break;
-
-        if (ret < 0)
+        if (!dwfl_frame_unwind(&state))
         {
-            warn("unw_step failed: %s", unw_strerror(ret));
+            warn("Cannot unwind frame: %s", dwfl_errmsg(-1));
             break;
         }
     }
 
-    if (!error_msg && !trace)
+    if (!error_msg && !head)
     {
-        set_error("No frames found for thread %d", thread_no);
+        set_error("No frames found for thread id %d", (int)tid);
     }
 
     struct btp_core_thread *thread = btp_core_thread_new();
-    thread->frames = trace;
+    thread->frames = head;
     return thread;
 }
 
-#endif /* WITH_LIBUNWIND */
+#endif /* WITH_LIBDWFL */
 
 struct btp_core_stacktrace *
 btp_parse_coredump(const char *core_file,
                    const char *exe_file,
                    char **error_msg)
 {
-#ifdef WITH_LIBUNWIND
-    struct btp_core_thread *trace = NULL;
+#ifdef WITH_LIBDWFL
+    struct btp_core_stacktrace *stacktrace = NULL;
 
     /* Initialize error_msg to 'no error'. */
     if (error_msg)
         *error_msg = NULL;
 
-    struct core_handle *ch = analyze_coredump(core_file, exe_file,
-                                              error_msg);
+    struct core_handle *ch = open_coredump(core_file, exe_file, error_msg);
     if (*error_msg)
         return NULL;
 
-    unw_addr_space_t as;
-    struct UCD_info *ui;
-    as = unw_create_addr_space(&_UCD_accessors, 0);
-    if (!as)
+    Dwfl_Frame_State *state = dwfl_frame_state_core(ch->dwfl, core_file);
+    if (!state)
     {
-        set_error("Failed to create address space");
+        set_error("Failed to initialize frame state from core '%s'",
+                   core_file);
         goto fail_destroy_handle;
     }
 
-    ui = _UCD_create(core_file);
-    if (!ui)
+    stacktrace = btp_core_stacktrace_new();
+    if (!stacktrace)
     {
-        set_error("Failed to set up core dump accessors for '%s'", core_file);
-        goto fail_destroy_as;
+        set_error("Failed to initialize stacktrace memory");
+        goto fail_destroy_handle;
     }
+    struct btp_core_thread *threads_tail = NULL;
 
-    struct exe_mapping_data *s;
-    for (s = ch->segments; s != NULL; s = s->next)
+    do
     {
-        if (_UCD_add_backing_file_at_vaddr(ui, s->start, s->filename) < 0)
+        struct btp_core_thread *t = unwind_thread(ch->dwfl, state, error_msg);
+        if (*error_msg)
         {
-            set_error("Can't add backing file '%s' at addr 0x%jx",
-                      s->filename, (uintmax_t)s->start);
-            goto fail_destroy_ui;
+            goto fail_destroy_trace;
         }
+        list_append(stacktrace->threads, threads_tail, t);
+        state = dwfl_frame_thread_next(state);
+    } while (state);
+
+fail_destroy_trace:
+    if (*error_msg)
+    {
+        btp_core_stacktrace_free(stacktrace);
+        stacktrace = NULL;
     }
-
-    /* NOTE: the stack unwinding should be run for each thread in the
-     * new version, like this:
-     *
-     * int tnum, nthreads = _UCD_get_num_threads(ui);
-     * for (tnum = 0; tnum < nthreads; tnum++)
-     * {
-     *     trace = unwind_thread(ui, as, ch->dwfl, tnum, error_msg);
-     *     if (*error_msg) {
-     *         // ...
-     *     }
-     *     // ...
-     * }
-     */
-
-    trace = unwind_thread(ui, as, ch->dwfl, 0, error_msg);
-
-fail_destroy_ui:
-    _UCD_destroy(ui);
-fail_destroy_as:
-    unw_destroy_addr_space(as);
 fail_destroy_handle:
     core_handle_free(ch);
 
-    if (trace)
-    {
-        struct btp_core_stacktrace *stacktrace = btp_core_stacktrace_new();
-        stacktrace->threads = trace;
-        return stacktrace;
-    }
+    stacktrace->executable = btp_strdup(executable_file);
+    /* FIXME: determine signal */
+    stacktrace->signal = 0;
+    /* FIXME: is this the best we can do? */
+    stacktrace->crash_thread = stacktrace->threads;
+    return stacktrace;
 
+#else /* WITH_LIBDWFL */
+    set_error("Btparser is built without elfutils-based unwind support");
     return NULL;
-#else /* WITH_LIBUNWIND */
-    set_error("Btparser is built without libunwind support");
-    return NULL;
-#endif /* WITH_LIBUNWIND */
+#endif /* WITH_LIBDWFL */
 }
