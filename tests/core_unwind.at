@@ -1,0 +1,68 @@
+# Checking the btparser. -*- Autotest -*-
+
+AT_BANNER([Core unwinding])
+
+m4_define([COMMON], [
+#include <lib/core_unwind.h>
+#include <lib/core_stacktrace.h>
+#include <lib/core_thread.h>
+#include <lib/core_frame.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+#define TPATH "../../programs/"
+#define FRAME(f, addr, name, bid, bid_off, fname) \
+          do {                                           \
+            assert(f);                                   \
+            assert(f->address == addr);                  \
+            assert(f->build_id);                         \
+            assert(strcmp(bid, f->build_id) == 0);       \
+            assert(f->build_id_offset == bid_off);       \
+            assert(f->file_name);                        \
+            assert(strstr(f->file_name, fname) != NULL); \
+            assert(f->function_name);                    \
+            assert(strcmp(name, f->function_name) == 0); \
+            f = f->next;                                 \
+          } while (0);
+])
+
+## ------------------------- ##
+## btp_parse_coredump_simple ##
+## ------------------------- ##
+
+AT_TESTFUN([btp_parse_coredump_simple],
+[
+COMMON
+
+int
+main(void)
+{
+  char *error = NULL;
+  struct btp_core_stacktrace *st;
+
+  st = btp_parse_coredump(
+         TPATH "null_dereference.core.x86_64",
+         TPATH "null_dereference.bin.x86_64",
+         &error);
+  assert(st != NULL);
+  assert(error == NULL);
+
+  /* one thread */
+  assert(st->threads != NULL);
+  assert(st->threads->next == NULL);
+  struct btp_core_frame *f = st->threads->frames;
+
+  FRAME(f, 0x4004ac, "a", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ac, "null_dereference.bin.x86_64");
+  FRAME(f, 0x4004ca, "b", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ca, "null_dereference.bin.x86_64");
+  FRAME(f, 0x4004d9, "b", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4d9, "null_dereference.bin.x86_64");
+  FRAME(f, 0x4004e9, "c", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4e9, "null_dereference.bin.x86_64");
+  FRAME(f, 0x4004ff, "main", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ff, "null_dereference.bin.x86_64");
+
+  return 0;
+}
+])
