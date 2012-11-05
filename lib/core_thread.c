@@ -35,6 +35,7 @@ void
 btp_core_thread_init(struct btp_core_thread *thread)
 {
     thread->frames = NULL;
+    thread->tid = -1;
     thread->next = NULL;
 }
 

@@ -41,6 +41,11 @@ struct btp_location;
 struct btp_core_thread
 {
     /**
+     * Thread identifier.
+     */
+    int64_t tid;
+
+    /**
      * Thread's frames, starting from the top of the stack.
      */
     struct btp_core_frame *frames;
