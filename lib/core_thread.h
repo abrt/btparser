@@ -30,6 +30,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <inttypes.h>
 
 struct btp_core_frame;
 struct btp_strbuf;
