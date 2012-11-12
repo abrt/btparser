@@ -89,6 +89,7 @@ struct core_handle
     int fd;
     Elf *eh;
     Dwfl *dwfl;
+    Dwfl_Callbacks cb;
 };
 
 /* FIXME: is there another way to pass the executable name to the find_elf
@@ -125,9 +126,9 @@ core_handle_free(struct core_handle *ch)
     }
 }
 
-static int find_elf_core (Dwfl_Module *mod, void **userdata,
-                          const char *modname, Dwarf_Addr base,
-                          char **file_name, Elf **elfp)
+static int
+find_elf_core (Dwfl_Module *mod, void **userdata, const char *modname,
+               Dwarf_Addr base, char **file_name, Elf **elfp)
 {
     int ret = -1;
 
@@ -158,16 +159,18 @@ static int find_elf_core (Dwfl_Module *mod, void **userdata,
 }
 
 /* Do not use debuginfo files at all. */
-static int find_debuginfo_none (Dwfl_Module *mod, void **userdata,
-        const char *modname, GElf_Addr base, const char *file_name,
-        const char *debuglink_file, GElf_Word debuglink_crc,
-        char **debuginfo_file_name)
+static int
+find_debuginfo_none (Dwfl_Module *mod, void **userdata, const char *modname,
+                     GElf_Addr base, const char *file_name,
+                     const char *debuglink_file, GElf_Word debuglink_crc,
+                     char **debuginfo_file_name)
 {
     return -1;
 }
 
-static int touch_module(Dwfl_Module *mod, void **userdata, const char *name,
-                        Dwarf_Addr start_addr, void *arg)
+static int
+touch_module(Dwfl_Module *mod, void **userdata, const char *name,
+             Dwarf_Addr start_addr, void *arg)
 {
     GElf_Addr bias;
 
@@ -184,27 +187,25 @@ static int touch_module(Dwfl_Module *mod, void **userdata, const char *name,
 static struct core_handle *
 open_coredump(const char *elf_file, const char *exe_file, char **error_msg)
 {
-    struct exe_mapping_data *head = NULL, **tail = &head;
-    int fd;
-    Elf *e = NULL;
+    struct core_handle *ch = btp_mallocz(sizeof(*ch));
 
     /* Initialize libelf, open the file and get its Elf handle. */
     if (elf_version(EV_CURRENT) == EV_NONE)
     {
         set_error_elf("elf_version");
-        return NULL;
+        goto fail_free;
     }
 
     /* Open input file, and parse it. */
-    fd = open(elf_file, O_RDONLY);
-    if (fd < 0)
+    ch->fd = open(elf_file, O_RDONLY);
+    if (ch->fd < 0)
     {
         set_error("Unable to open '%s': %s", elf_file, strerror(errno));
-        return NULL;
+        goto fail_free;
     }
 
-    e = elf_begin(fd, ELF_C_READ, NULL);
-    if (e == NULL)
+    ch->eh = elf_begin(ch->fd, ELF_C_READ, NULL);
+    if (ch->eh == NULL)
     {
         set_error_elf("elf_begin");
         goto fail_close;
@@ -212,57 +213,48 @@ open_coredump(const char *elf_file, const char *exe_file, char **error_msg)
 
     /* Check that we are working with a coredump. */
     GElf_Ehdr ehdr;
-    if (gelf_getehdr(e, &ehdr) == NULL || ehdr.e_type != ET_CORE)
+    if (gelf_getehdr(ch->eh, &ehdr) == NULL || ehdr.e_type != ET_CORE)
     {
         set_error("File '%s' is not a coredump", elf_file);
         goto fail_elf;
     }
 
-    Dwfl_Callbacks dwcb =
-    {
-        .find_elf = find_elf_core,
-        .find_debuginfo = find_debuginfo_none,
-    /*  Use the line below to also use debuginfo files for symbols
-        .find_debuginfo = dwfl_build_id_find_debuginfo,
-    */
-        .section_address = dwfl_offline_section_address
-    };
     executable_file = exe_file;
+    ch->cb.find_elf = find_elf_core;
+    ch->cb.find_debuginfo = find_debuginfo_none;
+    ch->cb.section_address = dwfl_offline_section_address;
+    ch->dwfl = dwfl_begin(&ch->cb);
 
-    Dwfl *dwfl = dwfl_begin(&dwcb);
-
-    if (dwfl_core_file_report(dwfl, e) == -1)
+    if (dwfl_core_file_report(ch->dwfl, ch->eh) == -1)
     {
         set_error_dwfl("dwfl_core_file_report");
         goto fail_dwfl;
     }
 
-    if (dwfl_report_end(dwfl, NULL, NULL) != 0)
+    if (dwfl_report_end(ch->dwfl, NULL, NULL) != 0)
     {
         set_error_dwfl("dwfl_report_end");
         goto fail_dwfl;
     }
 
     /* needed so that module filenames are available during unwinding */
-    ptrdiff_t ret = dwfl_getmodules(dwfl, touch_module, &tail, 0);
+    ptrdiff_t ret = dwfl_getmodules(ch->dwfl, touch_module, NULL, 0);
     if (ret == -1)
     {
         set_error_dwfl("dwfl_getmodules");
         goto fail_dwfl;
     }
 
-    struct core_handle *ch = btp_mallocz(sizeof(*ch));
-    ch->fd = fd;
-    ch->eh = e;
-    ch->dwfl = dwfl;
     return ch;
 
 fail_dwfl:
-    dwfl_end(dwfl);
+    dwfl_end(ch->dwfl);
 fail_elf:
-    elf_end(e);
+    elf_end(ch->eh);
 fail_close:
-    close(fd);
+    close(ch->fd);
+fail_free:
+    free(ch);
 
     return NULL;
 }
