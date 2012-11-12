@@ -81,6 +81,9 @@ AC_CHECK_LIB([elf], [main])
 AC_CHECK_LIB([dw], [dwfl_frame_state_core])
 AC_CHECK_LIB([dl], [main])
 
+# lzma - minidebuginfo support
+AC_CHECK_LIB([lzma], [lzma_mf_is_supported])
+
 # rpm
 AC_CHECK_LIB([rpm], [main])
 

@@ -33,6 +33,9 @@
 /* Define to 1 if you have the <libelf.h> header file. */
 #undef HAVE_LIBELF_H
 
+/* Define to 1 if you have the `lzma' library (-llzma). */
+#undef HAVE_LIBLZMA
+
 /* Have libopcodes compiled with -fPIC */
 #undef HAVE_LIBOPCODES
 

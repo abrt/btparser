@@ -42,6 +42,10 @@
 #include <elfutils/libdwfl.h>
 #endif
 
+#ifdef HAVE_LIBLZMA
+#include <lzma.h>
+#endif
+
 /* Error/warning reporting macros. Allows the error reporting code to be less
  * verbose with the restrictions that:
  *  - pointer to error message pointer must be always named "error_msg"
@@ -89,7 +93,9 @@ struct core_handle
     int fd;
     Elf *eh;
     Dwfl *dwfl;
+    Dwfl *dwfl_minidebug; /* another dwfl handle, one that uses minidebuginfos */
     Dwfl_Callbacks cb;
+    Dwfl_Callbacks cb_minidebug;
 };
 
 /* FIXME: is there another way to pass the executable name to the find_elf
@@ -111,6 +117,19 @@ warn(const char *fmt, ...)
 
 }
 
+/* Delete the temporary file created in find_debuginfo_lzma. */
+static int
+unlink_tempfile(Dwfl_Module *mod, void **userdata, const char *name,
+                Dwarf_Addr start_addr, void *arg)
+{
+    char *filename = *userdata;
+    if (filename)
+    {
+        unlink(filename);
+    }
+    return DWARF_CB_OK;
+}
+
 static void
 core_handle_free(struct core_handle *ch)
 {
@@ -118,6 +137,12 @@ core_handle_free(struct core_handle *ch)
     {
         if (ch->dwfl)
             dwfl_end(ch->dwfl);
+        if (ch->dwfl_minidebug)
+        {
+            /* Delete the temporary files. */
+            dwfl_getmodules(ch->dwfl_minidebug, unlink_tempfile, NULL, 0);
+            dwfl_end(ch->dwfl_minidebug);
+        }
         if (ch->eh)
             elf_end(ch->eh);
         if (ch->fd > 0)
@@ -168,6 +193,166 @@ find_debuginfo_none (Dwfl_Module *mod, void **userdata, const char *modname,
     return -1;
 }
 
+/* TODO: move all the LZMA stuff to its own file so that this one is not
+ * polluted with #ifdefs. Requires private header. */
+#ifdef HAVE_LIBLZMA
+static Elf_Data*
+get_gnu_debugdata(Elf *e)
+{
+    size_t shstrndx;
+    if (elf_getshdrstrndx(e, &shstrndx) < 0)
+        return NULL;
+
+    Elf_Scn *scn = NULL;
+    while ((scn = elf_nextscn(e, scn)) != NULL)
+    {
+        GElf_Shdr shdr;
+        if (gelf_getshdr(scn, &shdr) != &shdr)
+            return NULL;
+
+        char *name = elf_strptr(e, shstrndx, shdr.sh_name);
+        if (name == NULL)
+            return NULL;
+
+        if (strcmp(name, ".gnu_debugdata") == 0)
+            break;
+    }
+
+    if (scn == NULL)
+        return NULL;
+
+    Elf_Data *data = elf_getdata(scn, NULL);
+    if (data == NULL)
+        return NULL;
+
+    return data;
+}
+
+static int
+do_write(int fd, const void *buf, size_t len)
+{
+    ssize_t ret;
+    ssize_t total = 0;
+
+    while (len)
+    {
+        ret = TEMP_FAILURE_RETRY(write(fd, buf, len));
+
+        if (ret < 0)
+        {
+            if (total)
+            {
+                /* we already wrote some! */
+                /* user can do another write to know the error code */
+                return total;
+            }
+            return ret; /* write() returns -1 on failure. */
+        }
+
+        total += ret;
+        buf = ((const char *)buf) + ret;
+        len -= ret;
+    }
+
+    return total;
+}
+
+static int
+unlzma_section_to_file(Elf_Data *data, char **filename)
+{
+    lzma_ret ret;
+    lzma_stream strm = LZMA_STREAM_INIT;
+
+    ret = lzma_stream_decoder(&strm, UINT64_MAX, 0);
+    if (ret != LZMA_OK)
+    {
+        warn("Cannot initialize LZMA decoder: error code %u", ret);
+        return -1;
+    }
+
+    /* NOTE: we may unlink the tempfile immediately and do not worry about
+     * deleting them later. I'm not sure whether libdwfl doesn't require a
+     * valid file name though. */
+    char *fname = btp_strdup("/tmp/btparser.XXXXXX");
+    int tempfd = mkstemp(fname);
+    if (tempfd < 0)
+    {
+        warn("Cannot create temporary file: %s", strerror(errno));
+        return -1;
+    }
+
+    uint8_t outbuf[BUFSIZ];
+    strm.next_in = (uint8_t*)data->d_buf;
+    strm.avail_in = data->d_size;
+    strm.next_out = outbuf;
+    strm.avail_out = sizeof(outbuf);
+    ret = LZMA_OK;
+
+    while(1)
+    {
+        ret = lzma_code(&strm, LZMA_RUN);
+
+        if (strm.avail_out == 0 || ret == LZMA_STREAM_END)
+        {
+            size_t write_size = sizeof(outbuf) - strm.avail_out;
+            if (do_write(tempfd, outbuf, write_size) != write_size)
+            {
+                warn("Unable to write to temporary file: %s", strerror(errno));
+                goto fail_unlink;
+            }
+
+            strm.next_out = outbuf;
+            strm.avail_out = sizeof(outbuf);
+        }
+
+        if (ret == LZMA_STREAM_END)
+            break;
+
+        if (ret != LZMA_OK)
+        {
+            warn("LZMA decoder failed: error code %u", ret);
+            goto fail_unlink;
+        }
+    }
+
+    *filename = fname;
+    return tempfd;
+
+fail_unlink:
+    unlink(fname);
+    close(tempfd);
+    free(fname);
+    return -1;
+}
+
+static int
+find_debuginfo_lzma (Dwfl_Module *mod, void **userdata,
+        const char *modname, GElf_Addr base, const char *file_name,
+        const char *debuglink_file, GElf_Word debuglink_crc,
+        char **debuginfo_file_name)
+{
+    btp_debug_parser = 1;
+
+    /* Find the .gnu_debugdata section. */
+    GElf_Addr bias;
+    Elf *elf = dwfl_module_getelf(mod, &bias);
+    if (!elf)
+        return -1;
+
+    Elf_Data *data = get_gnu_debugdata(elf);
+    if (!data)
+        return -1;
+
+    /* UnLZMA to temporary file. */
+    int fd = unlzma_section_to_file(data, debuginfo_file_name);
+
+    /* Save the tempfile path so that we can delete it later. */
+    *userdata = btp_strdup(*debuginfo_file_name);
+
+    return fd;
+}
+#endif
+
 static int
 touch_module(Dwfl_Module *mod, void **userdata, const char *name,
              Dwarf_Addr start_addr, void *arg)
@@ -181,6 +366,38 @@ touch_module(Dwfl_Module *mod, void **userdata, const char *name,
     }
 
     return DWARF_CB_OK;
+}
+
+static Dwfl*
+init_dwfl(Elf *e, Dwfl_Callbacks *dwcb, char **error_msg)
+{
+    Dwfl *dwfl = dwfl_begin(dwcb);
+
+    if (dwfl_core_file_report(dwfl, e) == -1)
+    {
+        set_error_dwfl("dwfl_core_file_report");
+        goto fail_dwfl;
+    }
+
+    if (dwfl_report_end(dwfl, NULL, NULL) != 0)
+    {
+        set_error_dwfl("dwfl_report_end");
+        goto fail_dwfl;
+    }
+
+    /* needed so that module filenames are available during unwinding */
+    ptrdiff_t ret = dwfl_getmodules(dwfl, touch_module, NULL, 0);
+    if (ret == -1)
+    {
+        set_error_dwfl("dwfl_getmodules");
+        goto fail_dwfl;
+    }
+
+    return dwfl;
+
+fail_dwfl:
+    dwfl_end(dwfl);
+    return NULL;
 }
 
 /* Gets dwfl handle and executable map data to be used for unwinding */
@@ -220,30 +437,51 @@ open_coredump(const char *elf_file, const char *exe_file, char **error_msg)
     }
 
     executable_file = exe_file;
+
+    /* We're initializing two dwfl instances, and you may ask why? This is a
+     * workaround to support binaries containing "MiniDebugInfo" [1]. As of
+     * today (Nov 2012), elfutils does not support this feature. Elfutils does
+     * support custom hooks for supplying debuginfo file, so why not use those?
+     *
+     * The issue is in how elfutils handles symbol table lookup for a given
+     * address. When either the main ELF file or the external debuginfo
+     * contains .symtab section, this section is used for the lookup, as it is
+     * assumed to be the full symbol table. Stripped binaries do not contain
+     * this section so if it is not found .dynsym section is used. This section
+     * contains only dynamic symbols and is a subset of the full symbol table.
+     *
+     * The "MiniDebugInfo" contained in .gnu_debugdata is a compressed
+     * debuginfo file containing a .symtab section. This symtab section is,
+     * however, not a superset of the .dynsym section of the binary - it
+     * contains all the symbol table entries that are not in the .dynsym
+     * section. So to get the full symbol table, you've got to merge the two.
+     * Elfutils do not look up both .symtab and .dynsym, though.
+     *
+     * Here comes this ugly hack. We keep two independent dwfl handles, one
+     * that accesses the .dynsym sections (or full .symtab if present) and the
+     * other that accesses the .symtab sections from the MiniDebugInfo. The
+     * MiniDebugInfo is uncompressed to a temporary file and deleted
+     * afterwards. So whenever we try to resolve an address to a symbol, we do
+     * this on both dwfl handles (and take the better result, see
+     * resolve_addr_name).
+     *
+     * [1] http://fedoraproject.org/wiki/Features/MiniDebugInfo
+     */
     ch->cb.find_elf = find_elf_core;
-    ch->cb.find_debuginfo = find_debuginfo_none;
+    ch->cb.find_debuginfo = find_debuginfo_none; /* dwfl_build_id_find_debuginfo; */
     ch->cb.section_address = dwfl_offline_section_address;
-    ch->dwfl = dwfl_begin(&ch->cb);
+    ch->dwfl = init_dwfl(ch->eh, &(ch->cb), error_msg);
+    if (!ch->dwfl)
+        goto fail_elf;
 
-    if (dwfl_core_file_report(ch->dwfl, ch->eh) == -1)
-    {
-        set_error_dwfl("dwfl_core_file_report");
+#ifdef HAVE_LIBLZMA
+    ch->cb_minidebug.find_elf = find_elf_core;
+    ch->cb_minidebug.find_debuginfo = find_debuginfo_lzma;
+    ch->cb_minidebug.section_address = dwfl_offline_section_address;
+    ch->dwfl_minidebug = init_dwfl(ch->eh, &(ch->cb_minidebug), error_msg);
+    if (!ch->dwfl_minidebug)
         goto fail_dwfl;
-    }
-
-    if (dwfl_report_end(ch->dwfl, NULL, NULL) != 0)
-    {
-        set_error_dwfl("dwfl_report_end");
-        goto fail_dwfl;
-    }
-
-    /* needed so that module filenames are available during unwinding */
-    ptrdiff_t ret = dwfl_getmodules(ch->dwfl, touch_module, NULL, 0);
-    if (ret == -1)
-    {
-        set_error_dwfl("dwfl_getmodules");
-        goto fail_dwfl;
-    }
+#endif
 
     return ch;
 
@@ -259,8 +497,67 @@ fail_free:
     return NULL;
 }
 
+/* Resolve symbol in given dwfl instance. Returns true if the symbol has size
+ * and thus is probably the function symbol. */
+static bool
+resolve_one(Dwfl *dwfl, GElf_Addr pc, const char **out_name, GElf_Addr *addr)
+{
+    const char *name;
+    Dwfl_Module *mod;
+    GElf_Sym sym;
+
+    mod = dwfl_addrmodule(dwfl, pc);
+    if (mod)
+    {
+        name = dwfl_module_addrsym(mod, pc, &sym, NULL);
+        if (name)
+        {
+            if (sym.st_size > 0)
+            {
+                *out_name = name;
+                return true;
+            }
+            else if (sym.st_value > *addr)
+            {
+                *out_name = name;
+                *addr = sym.st_value;
+            }
+        }
+    }
+
+    return false;
+}
+
+static char*
+resolve_addr_name(struct core_handle *ch, Dwarf_Addr pc)
+{
+    GElf_Addr sizeless_addr = 0;
+    const char *name = NULL;
+
+    /* If the first instance has symbol w/ size, return it.
+     * Otherwise store the closest sizeless. */
+    if (resolve_one(ch->dwfl, (GElf_Addr)pc, &name, &sizeless_addr))
+        return btp_strdup(name);
+
+    /* Only if we have dwfl instance for minidebuginfo:
+     * If the second instance has symbol w/ size, return it.
+     * If the closest symbol w/o size is closer than the previous, store it */
+    if (ch->dwfl_minidebug
+            && resolve_one(ch->dwfl_minidebug, (GElf_Addr)pc, &name,
+                           &sizeless_addr))
+        return btp_strdup(name);
+
+    /* We did not find a symbol with size at this point.
+     * Did we find *any* * symbol? */
+    if (name)
+        return btp_strdup(name);
+
+    /* No symbol. */
+    return NULL;
+}
+
 static struct btp_core_thread *
-unwind_thread(Dwfl *dwfl, Dwfl_Frame_State *state, char **error_msg)
+unwind_thread(struct core_handle *ch, Dwfl_Frame_State *state, char **error_msg)
 {
     int ret;
     struct btp_core_frame *head = NULL, *tail = NULL;
@@ -286,11 +583,11 @@ unwind_thread(Dwfl *dwfl, Dwfl_Frame_State *state, char **error_msg)
         frame->address = frame->build_id_offset = (uint64_t)pc;
         list_append(head, tail, frame);
 
-        Dwfl_Module *mod = dwfl_addrmodule(dwfl, (Dwarf_Addr)pc_adjusted);
+        Dwfl_Module *mod = dwfl_addrmodule(ch->dwfl, pc_adjusted);
         if (mod)
         {
             const unsigned char *build_id_bits;
-            const char *filename, *funcname;
+            const char *filename;
             GElf_Addr bid_addr;
             Dwarf_Addr start;
 
@@ -304,15 +601,12 @@ unwind_thread(Dwfl *dwfl, Dwfl_Frame_State *state, char **error_msg)
             if (dwfl_module_info(mod, NULL, &start, NULL, NULL, NULL,
                                  &filename, NULL) != NULL)
             {
-                frame->build_id_offset = (Dwarf_Addr)pc - start;
+                frame->build_id_offset = pc - start;
                 if (filename)
                     frame->file_name = btp_strdup(filename);
             }
-
-            funcname = dwfl_module_addrname(mod, (GElf_Addr)pc_adjusted);
-            if (funcname)
-                frame->function_name = btp_strdup(funcname);
         }
+        frame->function_name = resolve_addr_name(ch, pc_adjusted);
 
         if (!dwfl_frame_unwind(&state))
         {
@@ -368,7 +662,7 @@ btp_parse_coredump(const char *core_file,
 
     do
     {
-        struct btp_core_thread *t = unwind_thread(ch->dwfl, state, error_msg);
+        struct btp_core_thread *t = unwind_thread(ch, state, error_msg);
         if (*error_msg)
         {
             goto fail_destroy_trace;
