@@ -66,3 +66,44 @@ main(void)
   return 0;
 }
 ])
+
+## -------------------------------- ##
+## btp_parse_coredump_minidebuginfo ##
+## -------------------------------- ##
+
+AT_TESTFUN([btp_parse_coredump_minidebuginfo],
+[
+COMMON
+
+int
+main(void)
+{
+  char *error = NULL;
+  struct btp_core_stacktrace *st;
+
+  st = btp_parse_coredump(
+         TPATH "null_dereference_minidebuginfo.core.x86_64",
+         TPATH "null_dereference_minidebuginfo.bin.x86_64",
+         &error);
+  assert(st != NULL);
+  assert(error == NULL);
+
+  /* one thread */
+  assert(st->threads != NULL);
+  assert(st->threads->next == NULL);
+  struct btp_core_frame *f = st->threads->frames;
+
+  FRAME(f, 0x4004ac, "a", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ac, "null_dereference_minidebuginfo.bin.x86_64");
+  FRAME(f, 0x4004ca, "b", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ca, "null_dereference_minidebuginfo.bin.x86_64");
+  FRAME(f, 0x4004d9, "b", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4d9, "null_dereference_minidebuginfo.bin.x86_64");
+  FRAME(f, 0x4004e9, "c", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4e9, "null_dereference_minidebuginfo.bin.x86_64");
+  FRAME(f, 0x4004ff, "main", "c81d41853694532571768e1d8195bed759e645bb",
+        0x4ff, "null_dereference_minidebuginfo.bin.x86_64");
+
+  return 0;
+}
+])
