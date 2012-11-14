@@ -1,3 +1,8 @@
+== btparser 0.23
+Release 2012-11-14
+
+- More reliable stack trace parsing for C++ and Python
+
 == btparser 0.22
 Release 2012-11-01
 
