@@ -1,0 +1,19 @@
+__init__.py:49:execute:OperationalError: no such table: fedora_koji_rpm_provides
+
+Traceback (most recent call last):
+  File "/usr/bin/faf-refreshrepo", line 24, in <module>
+    repo.load(pool)
+  File "/usr/lib/python2.7/site-packages/pyfaf/libsolv.py", line 58, in load
+    return self.load_if_changed()
+  File "/usr/lib/python2.7/site-packages/pyfaf/libsolv.py", line 490, in load_if_changed
+    self.db.execute("SELECT COUNT(*) FROM {0}_provides".format(self.name))
+  File "/usr/lib/python2.7/site-packages/pyfaf/cache/__init__.py", line 181, in execute
+    self._cursor.execute(sql, parameters)
+  File "/usr/lib/python2.7/site-packages/pyfaf/cache/__init__.py", line 49, in execute
+    self.cursor.execute(sql, parameters)
+OperationalError: no such table: fedora_koji_rpm_provides
+
+Local variables in innermost frame:
+self: <pyfaf.cache.Cursor instance at 0x26f41b8>
+parameters: []
+sql: 'SELECT COUNT(*) FROM fedora_koji_rpm_provides'
