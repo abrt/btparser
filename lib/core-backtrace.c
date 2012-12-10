@@ -102,7 +102,11 @@ btp_backtrace_add_build_id(GList *backtrace, uintmax_t start, uintmax_t length,
         {
             /* NOTE: we could get by with just one copy of the string, but that
              * would mean more bookkeeping for us ... */
-            entry->build_id = btp_strndup(build_id, build_id_len);
+            if (build_id_len > 0)
+                entry->build_id = btp_strndup(build_id, build_id_len);
+            else
+                entry->build_id = NULL;
+
             entry->build_id_offset = entry->address - start;
             entry->modname = btp_strndup(modname, modname_len);
             entry->filename = btp_strndup(filename, filename_len);
