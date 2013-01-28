@@ -1,0 +1,32 @@
+kernel BUG at kernel/smpboot.c:125!
+invalid opcode: 0000 [#3] SMP 
+Modules linked in: fuse nf_conntrack_netbios_ns nf_conntrack_broadcast lockd sunrpc bnep bluetooth vboxpci(OF) vboxnetadp(OF) vboxnetflt(OF) ipt_MASQUERADE tp_smapi(OF) thinkpad_ec(OF) vboxdrv(OF) ip6table_mangle ip6t_REJECT nf_conntrack_ipv6 nf_defrag_ipv6 iptable_nat nf_nat_ipv4 nf_nat iptable_mangle nf_conntrack_ipv4 nf_defrag_ipv4 xt_conntrack nf_conntrack ebtable_filter ebtables ip6table_filter ip6_tables binfmt_misc uvcvideo videobuf2_vmalloc videobuf2_memops videobuf2_core videodev media snd_hda_codec_hdmi snd_hda_codec_conexant iTCO_wdt iTCO_vendor_support arc4 coretemp kvm_intel kvm iwldvm mac80211 snd_hda_intel microcode snd_hda_codec snd_hwdep i2c_i801 snd_seq snd_seq_device snd_pcm iwlwifi lpc_ich cfg80211 mfd_core snd_page_alloc snd_timer e1000e mei thinkpad_acpi snd soundcore rfkill uinput crc32c_intel i915 i2c_algo_bit drm_kms_helper ghash_clmulni_intel drm sdhci_pci wmi sdhci mmc_core i2c_core video
+CPU 0 
+Pid: 17, comm: watchdog/2 Tainted: GF     D  C O 3.7.2-201.fc18.x86_64 #1 LENOVO 429029G/429029G
+RIP: 0010:[<ffffffff8108aa13>]  [<ffffffff8108aa13>] smpboot_thread_fn+0x193/0x1a0
+RSP: 0018:ffff88023244fe78  EFLAGS: 00010202
+RAX: ffffffff810eb3c0 RBX: ffff88023298c560 RCX: 0000000000000000
+RDX: 0000000000000000 RSI: ffff88023298c560 RDI: 0000000000000002
+RBP: ffff88023244feb8 R08: ffff88023244e000 R09: 0000000000000001
+R10: 0000000000000000 R11: 0000000000000001 R12: ffff880235800970
+R13: ffffffff81c3b9a0 R14: ffff88023298c560 R15: 0000000000000000
+FS:  0000000000000000(0000) GS:ffff88023e200000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f894f095996 CR3: 00000001ec28b000 CR4: 00000000000407f0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000ffff0ff0 DR7: 0000000000000400
+Process watchdog/2 (pid: 17, threadinfo ffff88023244e000, task ffff88023298c560)
+Stack:
+ ffff88023244fe88 0000000000000000 ffff88023244feb8 0000000000000001
+ ffff880232897d18 ffff880235800970 ffffffff8108a880 0000000000000000
+ ffff88023244ff48 ffffffff81081c80 ffffffffffffffff 0000000000000005
+Call Trace:
+ [<ffffffff8108a880>] ? lg_global_unlock+0x60/0x60
+ [<ffffffff81081c80>] kthread+0xc0/0xd0
+ [<ffffffff81010909>] ? perf_trace_xen_mmu_pgd+0xc9/0xe0
+ [<ffffffff81081bc0>] ? kthread_create_on_node+0x120/0x120
+ [<ffffffff8163da2c>] ret_from_fork+0x7c/0xb0
+ [<ffffffff81081bc0>] ? kthread_create_on_node+0x120/0x120
+Code: c0 77 00 0f a3 3a 19 d2 31 f6 85 d2 40 0f 95 c6 ff d0 4c 89 e7 e8 3e 4f 0f 00 48 83 c4 20 31 c0 5b 41 5c 41 5d 41 5e 5d c3 0f 0b <0f> 0b 66 66 2e 0f 1f 84 00 00 00 00 00 66 66 66 66 90 55 48 c7 
+RIP  [<ffffffff8108aa13>] smpboot_thread_fn+0x193/0x1a0
+ RSP <ffff88023244fe78>

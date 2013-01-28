@@ -66,7 +66,7 @@ btp_parse_kerneloops(char *text, const char *kernelver)
 {
     GList *result = NULL;
 
-    char *nextline = NULL, *line = text;
+    char *nextline = NULL, *line = text, *ip;
     while (line)
     {
         /* \n was replaced by \0 in the previous round */
@@ -79,6 +79,9 @@ btp_parse_kerneloops(char *text, const char *kernelver)
             *nextline = '\0';
             ++nextline;
         }
+
+        /* is it just instruction pointer dump? */
+        ip = strstr(line, "IP:");
 
         /* timestamp [123456.654321] may be present in the oops, skip it */
         line = strchr(line, '[');
@@ -96,6 +99,17 @@ btp_parse_kerneloops(char *text, const char *kernelver)
                 line = nextline;
                 continue;
             }
+        }
+
+        /* a special line with instruction pointer may be present in the format
+           RIP: 0010:[<ffffffff811c6ed5>]  [<ffffffff811c6ed5>] __block_write_full_page+0xa5/0x350
+           jump to the _second_ address */
+
+        if (ip)
+        {
+            char *second_address = strstr(line + 2, "[<");
+            if (second_address)
+                line = second_address;
         }
 
         struct backtrace_entry *frame = btp_mallocz(sizeof(struct backtrace_entry));
@@ -193,6 +207,23 @@ btp_parse_kerneloops(char *text, const char *kernelver)
     /* paranoia - should never happen */
     if (nextline)
         *(nextline - 1) = '\n';
+
+    /* sometimes there is instruction pointer frame is listed again at the end
+       1) it is not the last function called
+       2) it was already parsed before as first frame
+       drop it */
+
+    GList *first = g_list_first(result);
+    GList *last = g_list_last(result);
+    struct backtrace_entry *first_frame = (struct backtrace_entry *)first->data;
+    struct backtrace_entry *last_frame = (struct backtrace_entry *)last->data;
+
+    if (first_frame->address == last_frame->address &&
+        btp_strcmp0(first_frame->symbol, last_frame->symbol) == 0 &&
+        btp_strcmp0(first_frame->filename, last_frame->filename) == 0)
+    {
+        g_list_remove(result, last_frame);
+    }
 
     return result;
 }

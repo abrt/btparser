@@ -237,3 +237,48 @@ int main(void)
   return 0;
 }
 ]])
+
+## ------------------------------- ##
+## btp_parse_kerneloops_x86_64_RIP ##
+## ------------------------------- ##
+
+AT_TESTFUN([btp_parse_kerneloops_x86_64_RIP],
+[[
+#include <lib/core-backtrace-oops.h>
+#include <lib/utils.h>
+#include <glib.h>
+#include <assert.h>
+
+char *kver = "N/A";
+GList *oops = NULL;
+
+void t(uint64_t addr, char *sym)
+{
+  assert(oops);
+  struct backtrace_entry *f = oops->data;
+
+  assert(f->address == addr);
+  assert(strcmp(f->symbol, sym) == 0);
+  assert(strcmp(f->filename, "vmlinux") == 0);
+  oops = g_list_next(oops);
+}
+
+int main(void)
+{
+  char *str = btp_file_to_string("../../oopses/oops.x86_64_RIP");
+  assert(str);
+  oops = btp_parse_kerneloops(str, kver);
+  assert(oops);
+
+  t(0xffffffff8108aa13, "smpboot_thread_fn");
+  t(0xffffffff8108a880, "lg_global_unlock");
+  t(0xffffffff81081c80, "kthread");
+  t(0xffffffff81010909, "perf_trace_xen_mmu_pgd");
+  t(0xffffffff81081bc0, "kthread_create_on_node");
+  t(0xffffffff8163da2c, "ret_from_fork");
+  t(0xffffffff81081bc0, "kthread_create_on_node");
+  assert(oops == NULL);
+
+  return 0;
+}
+]])
