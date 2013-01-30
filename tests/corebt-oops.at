@@ -118,7 +118,6 @@ int main(void)
 
   t(0xc0446902, "warn_slowpath_common");
   t(0xc087237a, "dev_watchdog");
-  t(0xc087237a, "dev_watchdog");
   t(0xc04469d3, "warn_slowpath_fmt");
   t(0xc087237a, "dev_watchdog");
   t(0xc044d410, "tasklet_hi_schedule_first");

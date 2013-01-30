@@ -61,6 +61,39 @@ Modules linked in:
 ----- END -----
 */
 
+static bool
+btp_backtrace_entry_equal(struct backtrace_entry *e1,
+                          struct backtrace_entry *e2)
+{
+    if (e1 == e2)
+        return true;
+
+    if (!e1 || !e2)
+        return false;
+
+    return (e1->address == e2->address &&
+            btp_strcmp0(e1->symbol, e2->symbol) == 0 &&
+            btp_strcmp0(e1->filename, e2->filename) == 0);
+}
+
+static GList *
+btp_drop_identical_frames(GList *kerneloops)
+{
+    GList *result = kerneloops, *cur = kerneloops, *next;
+    for (next = g_list_next(cur); next; next = g_list_next(cur))
+    {
+        while (btp_backtrace_entry_equal(cur->data, next->data))
+        {
+            result = g_list_remove(result, next->data);
+            next = g_list_next(cur);
+        }
+
+        cur = next;
+    }
+
+    return result;
+}
+
 GList *
 btp_parse_kerneloops(char *text, const char *kernelver)
 {
@@ -213,17 +246,15 @@ btp_parse_kerneloops(char *text, const char *kernelver)
        2) it was already parsed before as first frame
        drop it */
 
+    result = btp_drop_identical_frames(result);
+
     GList *first = g_list_first(result);
     GList *last = g_list_last(result);
     struct backtrace_entry *first_frame = (struct backtrace_entry *)first->data;
     struct backtrace_entry *last_frame = (struct backtrace_entry *)last->data;
 
-    if (first_frame->address == last_frame->address &&
-        btp_strcmp0(first_frame->symbol, last_frame->symbol) == 0 &&
-        btp_strcmp0(first_frame->filename, last_frame->filename) == 0)
-    {
-        g_list_remove(result, last_frame);
-    }
+    if (btp_backtrace_entry_equal(first_frame, last_frame))
+        result = g_list_remove(result, last_frame);
 
     return result;
 }
