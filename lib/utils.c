@@ -466,6 +466,25 @@ btp_skip_non_whitespace(const char *s)
 	return (char *) s;
 }
 
+char *
+btp_skip_whitespace_r(const char *s, const char *leftedge)
+{
+	/* NB: isspace('\0') returns 0 */
+	while (s >= leftedge && isspace(*s))
+            --s;
+
+	return (char *) s;
+}
+
+char *
+btp_skip_non_whitespace_r(const char *s, const char *leftedge)
+{
+	while (s >= leftedge && !isspace(*s))
+            --s;
+
+	return (char *) s;
+}
+
 int
 btp_hash_file(char result[BTP_SHA1_RESULT_LEN], const char *filename)
 {

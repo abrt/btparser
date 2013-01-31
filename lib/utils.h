@@ -296,6 +296,12 @@ btp_skip_whitespace(const char *s);
 char *
 btp_skip_non_whitespace(const char *s);
 
+char *
+btp_skip_whitespace_r(const char *s, const char *leftedge);
+
+char *
+btp_skip_non_whitespace_r(const char *s, const char *leftedge);
+
 /* get sha1sum of a file */
 int
 hash_text_file(char result[BTP_SHA1_RESULT_LEN], const char *filename);

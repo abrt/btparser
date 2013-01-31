@@ -150,6 +150,115 @@ read_string(const char **inptr)
     return btp_strndup(str, len);
 }
 
+static char *
+read_string_r(const char **inptr, const char *leftedge)
+{
+    const char *rcur;
+    const char *str = *inptr;
+    int len;
+
+    str = btp_skip_whitespace_r(str, leftedge);
+    rcur = str;
+    str = btp_skip_non_whitespace_r(str, leftedge);
+
+    len = rcur - str;
+    *inptr = str;
+
+    if (len == 1 && *(str + 1) == '-')
+        return NULL;
+
+    return btp_strndup(str + 1, len);
+}
+
+/* C++ function names with templates, namespaces and function pointers
+   are not easily parseable. The correct approach would be writing
+   a PDA, but this is not worth the effort here. Just cut two tokens
+   from the beginning, two tokens from the end and consider the rest
+   being the actual function name. */
+
+/* Expects a single null-terminated line of core-backtrace as input. */
+static struct btp_frame *
+btp_core_backtrace_parse_frame(const char *line)
+{
+    if (!line || strchr(line, '\n'))
+        return NULL;
+
+    struct frame_aux *aux = btp_mallocz(sizeof(*aux));
+    struct btp_frame *result = btp_frame_new();
+    btp_frame_init(result);
+    result->user_data = aux;
+    result->user_data_destructor = free_frame_aux;
+
+    unsigned chars_read;
+    char *cur = line, *rcur = line + strlen(line) - 1;
+    aux->build_id = read_string(&cur);
+
+    cur = btp_skip_whitespace(cur);
+    if (sscanf(cur, "0x%jx %n", &(result->address), &chars_read) < 1)
+    {
+        btp_frame_free(result);
+        return NULL;
+    }
+
+    cur = btp_skip_whitespace(cur + chars_read);
+    aux->fingerprint = read_string_r(&rcur, cur);
+    aux->filename = read_string_r(&rcur, cur);
+
+    rcur = btp_skip_whitespace_r(rcur, cur);
+    result->function_name = btp_strndup(cur, rcur - cur + 1);
+    if (strcmp(result->function_name, "-"))
+    {
+        free(result->function_name);
+        result->function_name = btp_strdup("??");
+    }
+
+    if (rcur - cur < 0)
+    {
+        btp_frame_free(result);
+        return NULL;
+    }
+
+    return result;
+}
+
+/* Processing by lines, not by characters. */
+struct btp_thread *
+btp_load_core_backtrace(const char *text)
+{
+    char *begin = text, *end;
+    struct btp_thread *result = btp_thread_new();
+    btp_thread_init(result);
+    struct btp_frame *frame;
+
+    while (begin)
+    {
+        end = strchr(begin, '\n');
+        if (end)
+            *end = '\0';
+
+        frame = btp_core_backtrace_parse_frame(begin);
+        if (frame)
+        {
+            if (!result->frames)
+                result->frames = frame;
+            else
+                btp_frame_add_sibling(result->frames, frame);
+        }
+
+        if (end)
+        {
+            *end = '\n';
+            ++end;
+        }
+
+        begin = end;
+    }
+
+    return result;
+}
+
+#if 0
+/* Keeping the old implementation commented out, just in case... */
 struct btp_thread *
 btp_load_core_backtrace(const char *text)
 {
@@ -257,6 +366,7 @@ btp_load_core_backtrace(const char *text)
 
     return thread;
 }
+#endif
 
 void
 btp_free_core_backtrace(struct btp_thread *thread)
