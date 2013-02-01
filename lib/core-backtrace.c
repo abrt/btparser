@@ -205,17 +205,17 @@ btp_core_backtrace_parse_frame(const char *line)
     aux->filename = read_string_r(&rcur, cur);
 
     rcur = btp_skip_whitespace_r(rcur, cur);
-    result->function_name = btp_strndup(cur, rcur - cur + 1);
-    if (strcmp(result->function_name, "-"))
-    {
-        free(result->function_name);
-        result->function_name = btp_strdup("??");
-    }
-
     if (rcur - cur < 0)
     {
         btp_frame_free(result);
         return NULL;
+    }
+
+    result->function_name = btp_strndup(cur, rcur - cur + 1);
+    if (strcmp(result->function_name, "-") == 0)
+    {
+        free(result->function_name);
+        result->function_name = btp_strdup("??");
     }
 
     return result;
