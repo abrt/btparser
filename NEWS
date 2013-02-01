@@ -1,3 +1,10 @@
+== btparser 0.25
+Release 2013-02-01
+
+- Rewrite core backtrace loader: parse all possible function names.
+- Remove duplicate kerneloops frames.
+- Omit RIP frame from kerneloopses.
+
 == btparser 0.24
 Release 2012-12-19
 
