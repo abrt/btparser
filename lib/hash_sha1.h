@@ -45,7 +45,12 @@
 #define BTP_SHA1_RESULT_LEN (5 * 4 * 2 + 1)
 
 typedef struct btp_sha1_ctx_t {
-    uint8_t wbuffer[64]; /* always correctly aligned for uint64_t */
+    /* usage of a union avoids aliasing compiler warnings */
+    union {
+        uint8_t u1[64];
+        uint32_t u4[16];
+        uint64_t u8[8];
+    } wbuffer;
     /* for sha256: void (*process_block)(struct md5_ctx_t*); */
     uint64_t total64;    /* must be directly before hash[] */
     uint32_t hash[8];    /* 4 elements for md5, 5 for sha1, 8 for sha256 */

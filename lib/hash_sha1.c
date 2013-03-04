@@ -75,9 +75,9 @@ static void sha1_process_block64(btp_sha1_ctx_t *ctx)
      * which otherwise will be needed to hold ctx pointer */
     for (i = 0; i < 16; i++)
         if (SHA1_BIG_ENDIAN)
-            W[i] = W[i+16] = ((uint32_t*)ctx->wbuffer)[i];
+            W[i] = W[i+16] = ctx->wbuffer.u4[i];
         else
-            W[i] = W[i+16] = bswap_32(((uint32_t*)ctx->wbuffer)[i]);
+            W[i] = W[i+16] = bswap_32(ctx->wbuffer.u4[i]);
 
     a = ctx->hash[0];
     b = ctx->hash[1];
@@ -190,7 +190,7 @@ static void common64_hash(btp_sha1_ctx_t *ctx, const void *buffer, size_t len)
         if (remaining > len)
             remaining = len;
         /* Copy data into aligned buffer */
-        memcpy(ctx->wbuffer + bufpos, buffer, remaining);
+        memcpy(ctx->wbuffer.u1 + bufpos, buffer, remaining);
         len -= remaining;
         buffer = (const char *)buffer + remaining;
         bufpos += remaining;
@@ -209,13 +209,13 @@ static void common64_end(btp_sha1_ctx_t *ctx, int swap_needed)
 {
     unsigned bufpos = ctx->total64 & 63;
     /* Pad the buffer to the next 64-byte boundary with 0x80,0,0,0... */
-    ctx->wbuffer[bufpos++] = 0x80;
+    ctx->wbuffer.u1[bufpos++] = 0x80;
 
     /* This loop iterates either once or twice, no more, no less */
     while (1)
     {
         unsigned remaining = 64 - bufpos;
-        memset(ctx->wbuffer + bufpos, 0, remaining);
+        memset(ctx->wbuffer.u1 + bufpos, 0, remaining);
         /* Do we have enough space for the length count? */
         if (remaining >= 8)
         {
@@ -223,8 +223,7 @@ static void common64_end(btp_sha1_ctx_t *ctx, int swap_needed)
             uint64_t t = ctx->total64 << 3;
             if (swap_needed)
                 t = bswap_64(t);
-            /* wbuffer is suitably aligned for this */
-            *(uint64_t *) (&ctx->wbuffer[64 - 8]) = t;
+            ctx->wbuffer.u8[7] = t;
         }
         PROCESS_BLOCK(ctx);
         if (remaining >= 8)
