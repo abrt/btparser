@@ -37,7 +37,8 @@ TESTSUITE_AT =	\
   normalize.at  \
   metrics.at \
   cluster.at \
-  sharedlib.at
+  sharedlib.at \
+  corebt-oops.at
 
 EXTRA_DIST += $(TESTSUITE_AT)
 TESTSUITE = $(srcdir)/testsuite
