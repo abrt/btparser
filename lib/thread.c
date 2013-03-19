@@ -402,7 +402,7 @@ btp_thread_skip_lwp(const char **input)
 struct btp_thread *
 btp_thread_parse_funs(const char *input)
 {
-    const char *next, *libname;
+    const char *next, *libname, *c;
     struct btp_thread *thread = btp_thread_new();
     struct btp_frame *frame, **pframe = &thread->frames;
     int number = 0;
@@ -413,9 +413,12 @@ btp_thread_parse_funs(const char *input)
         if (!next)
             break;
 
-        libname = strchr(input + 1, ' ');
-        if (!libname || libname > next)
-            libname = next;
+        /* Search for last space before newline. */
+        for (c = input, libname = next; ; libname = c) {
+            c = strchr(c + 1, ' ');
+            if (!c || c > next)
+                break;
+        }
 
         frame = btp_frame_new();
         frame->function_name = btp_strndup(input, libname - input);
