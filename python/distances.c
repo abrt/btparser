@@ -84,7 +84,13 @@ PyObject *p_btp_distances_new(PyTypeObject *object, PyObject *args, PyObject *kw
                 PyErr_SetString(PyExc_TypeError, "Must be a list of btparser.Thread objects");
                 return NULL;
             }
-            threads[i] = ((ThreadObject *)obj)->thread;
+
+            ThreadObject *to = obj;
+            if (thread_prepare_linked_list(to) < 0)
+            {
+                return NULL;
+            }
+            threads[i] = to->thread;
         }
         if (m < 1 || n < 2)
         {
