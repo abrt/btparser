@@ -117,22 +117,50 @@ btp_backtrace_remove_threads_except_one(struct btp_backtrace *backtrace,
     backtrace->threads = thread;
 }
 
+/* we do not care about thread numbers and btp_thread_cmp does not allow us to
+ * compare them */
+static int
+thread_cmp_dont_compare_number(struct btp_thread *t1, struct btp_thread *t2)
+{
+    struct btp_frame *f1 = t1->frames, *f2 = t2->frames;
+    do {
+        if (f1 && !f2)
+            return 1;
+        else if (f2 && !f1)
+            return -1;
+        else if (f1 && f2)
+        {
+            int frames = btp_frame_cmp(f1, f2, true);
+            if (frames != 0)
+                return frames;
+            f1 = f1->next;
+            f2 = f2->next;
+        }
+    } while (f1 || f2);
+
+    return 0;
+}
+
+enum requirement { ONE_MATCHING, ABORT_FUNCTION, FIRST_MATCHING };
 /**
  * Loop through all threads and if a single one contains the crash
  * frame on the top, return it. Otherwise, return NULL.
  *
- * If require_abort is true, it is also required that the thread
- * containing the crash frame contains some known "abort" function. In
- * this case there can be multiple threads with the crash frame on the
- * top, but only one of them might contain the abort function to
- * succeed.
+ * Parameter req controlls the criteria for matching thread:
+ * ONE_MATCHING   - There is only one thread that contains the crash frame.
+ * ABORT_FUNCTION - There may be multiple threads containing the crash frame
+ *                  but only one contains some known "abort" function.
+ * FIRST_MATCHING - If everything else fails, we sort the threads (in order to
+ *                  get deterministic results) and return the first thread
+ *                  containing the crash frame.
  */
 static struct btp_thread *
 btp_backtrace_find_crash_thread_from_crash_frame(struct btp_backtrace *backtrace,
-                                                 bool require_abort)
+                                                 enum requirement req)
 {
     if (btp_debug_parser)
-        printf("%s(backtrace, %s)\n", __FUNCTION__, require_abort ? "true" : "false");
+        printf("%s(backtrace, %s)\n", __FUNCTION__,
+               (req == ABORT_FUNCTION) ? "true" : "false");
 
     assert(backtrace->threads); /* checked by the caller */
     if (!backtrace->crash || !backtrace->crash->function_name)
@@ -146,7 +174,7 @@ btp_backtrace_find_crash_thread_from_crash_frame(struct btp_backtrace *backtrace
         bool same_name = top_frame &&
             top_frame->function_name &&
             0 == strcmp(top_frame->function_name, backtrace->crash->function_name);
-        bool abort_requirement_satisfied = !require_abort ||
+        bool abort_requirement_satisfied = (req != ABORT_FUNCTION) ||
             btp_glibc_thread_find_exit_frame(thread);
         if (btp_debug_parser)
         {
@@ -159,11 +187,18 @@ btp_backtrace_find_crash_thread_from_crash_frame(struct btp_backtrace *backtrace
         if (same_name && abort_requirement_satisfied)
         {
             if (NULL == result)
+            {
                 result = thread;
-            else
+            }
+            else if (req != FIRST_MATCHING)
             {
                 /* Second frame with the same function. Failure. */
                 return NULL;
+            }
+            else if (thread_cmp_dont_compare_number(thread, result) < 0)
+            {
+                /* We're just looking for the first thread that matches. */
+                result = thread;
             }
         }
 
@@ -188,7 +223,7 @@ btp_backtrace_find_crash_thread(struct btp_backtrace *backtrace)
      * this frame on the top, it is also simple.
      */
     struct btp_thread *thread;
-    thread = btp_backtrace_find_crash_thread_from_crash_frame(backtrace, false);
+    thread = btp_backtrace_find_crash_thread_from_crash_frame(backtrace, ONE_MATCHING);
     if (thread)
         return thread;
 
@@ -196,7 +231,15 @@ btp_backtrace_find_crash_thread(struct btp_backtrace *backtrace)
      * the crash frame on the top of stack.
      * Try to search for known abort functions.
      */
-    thread = btp_backtrace_find_crash_thread_from_crash_frame(backtrace, true);
+    thread = btp_backtrace_find_crash_thread_from_crash_frame(backtrace, ABORT_FUNCTION);
+    if (thread)
+        return thread;
+
+    /* There are multiple threads with the same crash frame and none of them
+     * contains known abort function.
+     * Take a guess and return the first one (from sorted threads).
+     */
+    thread = btp_backtrace_find_crash_thread_from_crash_frame(backtrace, FIRST_MATCHING);
 
     /* We might want to search a thread with known abort function, and
      * without the crash frame here. However, it hasn't been needed so
