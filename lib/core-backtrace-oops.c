@@ -82,10 +82,10 @@ btp_drop_identical_frames(GList *kerneloops)
     GList *result = kerneloops, *cur = kerneloops, *next;
     for (next = g_list_next(cur); next; next = g_list_next(cur))
     {
-        while (btp_backtrace_entry_equal(cur->data, next->data))
+        if (btp_backtrace_entry_equal(cur->data, next->data))
         {
             result = g_list_remove(result, next->data);
-            next = g_list_next(cur);
+            continue;
         }
 
         cur = next;
