@@ -37,6 +37,8 @@ extern "C" {
 #define BTP_digit "0123456789"
 #define BTP_alnum BTP_alpha BTP_digit
 
+#define __btp_printf(x, y) __attribute__((format(printf, (x), (y))))
+
 /**
  * Debugging output to stdout while parsing.
  * Default value is false.
@@ -72,7 +74,7 @@ btp_vasprintf(const char *format, va_list p);
  * Never returns NULL.
  */
 char *
-btp_asprintf(const char *format, ...);
+btp_asprintf(const char *format, ...) __btp_printf(1, 2);
 
 /**
  * Never returns NULL.

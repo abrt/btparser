@@ -21,6 +21,7 @@
 #define BTPARSER_STRBUF_H
 
 #include <stdarg.h>
+#include "utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -116,7 +117,7 @@ btp_strbuf_prepend_str(struct btp_strbuf *strbuf,
  */
 struct btp_strbuf *
 btp_strbuf_append_strf(struct btp_strbuf *strbuf,
-                       const char *format, ...);
+                       const char *format, ...) __btp_printf(2, 3);
 
 /**
  * Same as btp_strbuf_append_strf except that va_list is used instead of
@@ -133,7 +134,7 @@ btp_strbuf_append_strfv(struct btp_strbuf *strbuf,
  */
 struct btp_strbuf *
 btp_strbuf_prepend_strf(struct btp_strbuf *strbuf,
-                        const char *format, ...);
+                        const char *format, ...) __btp_printf(2, 3);
 
 /**
  * Same as btp_strbuf_prepend_strf except that va_list is used instead of
