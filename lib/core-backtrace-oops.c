@@ -20,6 +20,7 @@
 */
 
 #include <stdio.h>
+#include <inttypes.h>
 #include "utils.h"
 #include "core-backtrace-oops.h"
 
@@ -148,7 +149,7 @@ btp_parse_kerneloops(char *text, const char *kernelver)
         struct backtrace_entry *frame = btp_mallocz(sizeof(struct backtrace_entry));
 
         /* address */
-        if (sscanf(line, "[<%llx>]", &frame->address) != 1)
+        if (sscanf(line, "[<%" SCNx64 ">]", &frame->address) != 1)
         {
             btp_backtrace_entry_free(frame);
             /* not printing the error - not match means just skip line */
@@ -200,13 +201,16 @@ btp_parse_kerneloops(char *text, const char *kernelver)
         ++splitter;
 
         /* offset, function legth */
-        if (sscanf(splitter, "0x%x/0x%x", &frame->build_id_offset, &frame->function_length) != 2)
+        uintmax_t tmp_offset, tmp_length;
+        if (sscanf(splitter, "0x%jx/0x%jx", &tmp_offset, &tmp_length) != 2)
         {
             btp_backtrace_entry_free(frame);
             fprintf(stderr, "Unable to read offset & function length: '%s'\n", line);
             line = nextline;
             continue;
         }
+        frame->build_id_offset = (uintptr_t)tmp_offset;
+        frame->function_length = (uintptr_t)tmp_length;
 
         /* module */
         /* in the 2nd example mentioned above, [] also matches

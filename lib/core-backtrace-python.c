@@ -135,13 +135,16 @@ btp_parse_python_backtrace(char *text)
             continue;
         }
         offsetstr += strlen("line ");
-        if (sscanf(offsetstr, "%u", &frame->build_id_offset) != 1)
+
+        uintmax_t tmp_lineno;
+        if (sscanf(offsetstr, "%ju", &tmp_lineno) != 1)
         {
             btp_backtrace_entry_free(frame);
             fprintf(stderr, "Unable to parse line number\n");
             line = nextline;
             continue;
         }
+        frame->build_id_offset = (uintptr_t)tmp_lineno;
 
         /* function name */
         const char *funcname = strstr(splitter, ", in ");
