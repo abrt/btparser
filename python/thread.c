@@ -233,9 +233,9 @@ PyObject *p_btp_thread_str(PyObject *self)
 {
     ThreadObject *this = (ThreadObject *)self;
     struct btp_strbuf *buf = btp_strbuf_new();
-    btp_strbuf_append_strf(buf, "Thread #%u with %d frames",
+    btp_strbuf_append_strf(buf, "Thread #%u with %zd frames",
                            this->thread->number,
-                           PyList_Size(this->frames));
+                           (ssize_t)(PyList_Size(this->frames)));
     char *str = btp_strbuf_free_nobuf(buf);
     PyObject *result = Py_BuildValue("s", str);
     free(str);

@@ -74,9 +74,9 @@ btp_core_backtrace_fmt(GList *backtrace)
         entry = backtrace->data;
 
         /* BUILD_ID OFFSET SYMBOL MODNAME FINGERPRINT */
-        btp_strbuf_append_strf(strbuf, "%s 0x%x %s %s %s\n",
+        btp_strbuf_append_strf(strbuf, "%s 0x%jx %s %s %s\n",
                                OR_UNKNOWN(entry->build_id),
-                               entry->build_id_offset,
+                               (uintmax_t)entry->build_id_offset,
                                OR_UNKNOWN(entry->symbol),
                                OR_UNKNOWN(entry->filename),
                                OR_UNKNOWN(entry->fingerprint));

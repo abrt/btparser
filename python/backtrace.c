@@ -329,8 +329,8 @@ PyObject *p_btp_backtrace_str(PyObject *self)
 {
     BacktraceObject *this = (BacktraceObject *)self;
     struct btp_strbuf *buf = btp_strbuf_new();
-    btp_strbuf_append_strf(buf, "Backtrace with %d threads",
-                           PyList_Size(this->threads));
+    btp_strbuf_append_strf(buf, "Backtrace with %zd threads",
+                           (ssize_t)(PyList_Size(this->threads)));
     char *str = btp_strbuf_free_nobuf(buf);
     PyObject *result = Py_BuildValue("s", str);
     free(str);
