@@ -59,6 +59,12 @@ btp_mallocz(size_t size);
 /**
  * Never returns NULL.
  */
+void *
+btp_realloc(void *ptr, size_t size);
+
+/**
+ * Never returns NULL.
+ */
 char *
 btp_vasprintf(const char *format, va_list p);
 
