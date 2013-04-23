@@ -8,7 +8,10 @@ btparser_SOURCES = btparser.c
 btparser_LDADD = lib/libbtparser.la
 
 man_MANS = btparser.1
-EXTRA_DIST = $(man_MANS)
+EXTRA_DIST = btparser.1.in
+
+btparser.1: btparser.1.in
+	sed -e "s,\@PACKAGE_STRING\@,$(PACKAGE_STRING),g" $< > $@
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = btparser.pc

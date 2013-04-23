@@ -326,7 +326,7 @@ btparser_CFLAGS = -Wall
 btparser_SOURCES = btparser.c
 btparser_LDADD = lib/libbtparser.la
 man_MANS = btparser.1
-EXTRA_DIST = $(man_MANS) btparser.pc.in autogen.sh RELEASE \
+EXTRA_DIST = btparser.1.in btparser.pc.in autogen.sh RELEASE \
 	btparser.spec.in
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = btparser.pc
@@ -1016,6 +1016,9 @@ uninstall-man: uninstall-man1
 	uninstall-binPROGRAMS uninstall-man uninstall-man1 \
 	uninstall-pkgconfigDATA
 
+
+btparser.1: btparser.1.in
+	sed -e "s,\@PACKAGE_STRING\@,$(PACKAGE_STRING),g" $< > $@
 .PHONY: upload
 upload:
 	make dist-gzip

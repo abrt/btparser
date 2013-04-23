@@ -1,4 +1,4 @@
-.TH btparser "1" "24 May 2010" ""
+.TH btparser "1" "24 May 2010" "@PACKAGE_STRING@"
 .SH NAME
 btparser \- a backtrace analyzer
 .SH SYNOPSIS

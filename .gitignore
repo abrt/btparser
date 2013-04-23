@@ -4,6 +4,7 @@
 Makefile
 autom4te.cache
 btparser
+btparser.1
 btparser.pc
 btparser.spec
 *.o
