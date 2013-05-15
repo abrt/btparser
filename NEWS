@@ -1,3 +1,14 @@
+== btparser 0.26
+Release 2013-05-15
+
+- Try harder when looking for crash thread
+- Include version string in the man page
+- Fixed security issues
+- Fix crashes in drop identical oops frames when bt suffix contains only identical frames
+- Python: use updated frame list in Distances.__new__
+- Fix btp_thread_parse_funs for functions with spaces
+- Respect strict aliasing in sha1 implementation
+
 == btparser 0.25
 Release 2013-02-01
 
