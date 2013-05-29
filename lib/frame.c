@@ -66,6 +66,9 @@ btp_frame_free(struct btp_frame *frame)
 struct btp_frame *
 btp_frame_dup(struct btp_frame *frame, bool siblings)
 {
+    if (!frame)
+        return NULL;
+
     struct btp_frame *result = btp_frame_new();
     memcpy(result, frame, sizeof(struct btp_frame));
 
