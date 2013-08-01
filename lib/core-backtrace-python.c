@@ -172,14 +172,16 @@ btp_parse_python_backtrace(char *text)
                 if (frame->symbol[i] == ' ')
                     frame->symbol[i] = '_';
         }
-
-        /* build-id */
-        frame->build_id = btp_mallocz(BTP_SHA1_RESULT_LEN);
-        if (!btp_hash_file(frame->build_id, frame->filename))
+        else
         {
-            fprintf(stderr, "hash_text_file failed for '%s'\n", frame->filename);
-            free(frame->build_id);
-            frame->build_id = NULL;
+            /* build-id (mutually exclusive with C callback above) */
+            frame->build_id = btp_mallocz(BTP_SHA1_RESULT_LEN);
+            if (!btp_hash_file(frame->build_id, frame->filename))
+            {
+                fprintf(stderr, "hash_text_file failed for '%s'\n", frame->filename);
+                free(frame->build_id);
+                frame->build_id = NULL;
+            }
         }
 
         /* need prepend to flip the backtrace upside-down */
