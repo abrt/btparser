@@ -36,6 +36,7 @@ btp_normalize_oops_thread(struct btp_thread *thread)
     const char *blacklist[] = {
         "do_softirq",
         "do_vfs_ioctl",
+        "dump_stack",
         "flush_kthread_worker",
         "gs_change",
         "irq_exit",
