@@ -397,13 +397,19 @@ PyObject *p_btp_backtrace_find_crash_frame(PyObject *self, PyObject *args)
 
     FrameObject *result = (FrameObject *)PyObject_New(FrameObject, &FrameTypeObject);
     if (!result)
+    {
+        btp_frame_free(frame);
         return PyErr_NoMemory();
+    }
 
     result->frame = frame;
     this->crashframe = result;
 
     if (backtrace_rebuild_thread_python_list(this) < 0)
+    {
+        p_btp_frame_free((PyObject *)result);
         return NULL;
+    }
 
     return (PyObject *)result;
 }
@@ -581,13 +587,19 @@ PyObject *p_btp_backtrace_get_optimized_thread(PyObject *self, PyObject *args)
 
     ThreadObject *result = (ThreadObject *)PyObject_New(ThreadObject, &ThreadTypeObject);
     if (!result)
+    {
+        btp_thread_free(thread);
         return PyErr_NoMemory();
+    }
 
     result->thread = thread;
     result->frames = frame_linked_list_to_python_list(result->thread);
 
     if (backtrace_rebuild_thread_python_list(this) < 0)
+    {
+        p_btp_thread_free((PyObject *)result);
         return NULL;
+    }
 
     return (PyObject *)result;
 }
